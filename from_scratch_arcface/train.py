@@ -41,13 +41,31 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints"))
+    parser.add_argument("--experiment-root", type=Path, default=Path("experiments"), help="Deprecated alias for --model-root")
+    parser.add_argument("--model-root", type=Path, default=None, help="Root directory for .pt model files")
+    parser.add_argument("--history-root", type=Path, default=Path("histories"), help="Root directory for logs/configs")
+    parser.add_argument("--run-name", type=str, default=None, help="If set, use model_root/run_name and history_root/run_name")
+    parser.add_argument("--save-every", type=int, default=0, help="Save checkpoint_epoch_XXX.pt every N epochs")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    history_dir = args.checkpoint_dir
+    if args.run_name:
+        model_root = args.model_root if args.model_root is not None else args.experiment_root
+        args.checkpoint_dir = model_root / args.run_name
+        history_dir = args.history_root / args.run_name
     torch.manual_seed(args.seed)
     args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    history_dir.mkdir(parents=True, exist_ok=True)
+    snapshots_dir = args.checkpoint_dir / "snapshots"
+    if args.save_every > 0:
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
+    config = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
+    config["resolved_model_dir"] = str(args.checkpoint_dir)
+    config["resolved_history_dir"] = str(history_dir)
+    (history_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -147,7 +165,9 @@ def main():
             "threshold": threshold,
         }
         history.append(record)
-        (args.checkpoint_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
+        (history_dir / "history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
+        best_record = max(history, key=lambda item: item["val_ver_acc"])
+        (history_dir / "best_summary.json").write_text(json.dumps(best_record, indent=2), encoding="utf-8")
 
         state = {
             "epoch": epoch,
@@ -160,6 +180,8 @@ def main():
             "args": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
         }
         torch.save(state, args.checkpoint_dir / "last.pt")
+        if args.save_every > 0 and epoch % args.save_every == 0:
+            torch.save(state, snapshots_dir / f"epoch_{epoch:03d}.pt")
         if val_acc > best_acc:
             best_acc = val_acc
             best_threshold = threshold

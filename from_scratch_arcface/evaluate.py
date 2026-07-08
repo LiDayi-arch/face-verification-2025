@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -9,14 +10,25 @@ from dataset import FaceImageDataset, build_eval_transform
 
 
 @torch.no_grad()
-def embed_paths(model, paths: list[Path], device: torch.device, batch_size: int, num_workers: int) -> dict[str, np.ndarray]:
+def embed_paths(
+    model,
+    paths: list[Path],
+    device: torch.device,
+    batch_size: int,
+    num_workers: int,
+    tta: bool = False,
+) -> dict[str, np.ndarray]:
     model.eval()
     dataset = FaceImageDataset(paths, transform=build_eval_transform())
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
     embeddings: dict[str, np.ndarray] = {}
     for images, batch_paths in tqdm(loader, desc="Embedding", leave=False):
         images = images.to(device, non_blocking=True)
-        feats = model(images).detach().cpu().numpy().astype(np.float32)
+        feats = model(images)
+        if tta:
+            flipped_feats = model(torch.flip(images, dims=[3]))
+            feats = F.normalize(feats + flipped_feats)
+        feats = feats.detach().cpu().numpy().astype(np.float32)
         for path, feat in zip(batch_paths, feats):
             embeddings[path] = feat
     return embeddings
@@ -42,9 +54,10 @@ def evaluate_verification(
     device: torch.device,
     batch_size: int,
     num_workers: int,
+    tta: bool = False,
 ) -> tuple[float, float]:
     unique_paths = sorted({path for pair in pairs for path in pair})
-    embeddings = embed_paths(model, unique_paths, device, batch_size, num_workers)
+    embeddings = embed_paths(model, unique_paths, device, batch_size, num_workers, tta=tta)
     scores = np.array(
         [np.dot(embeddings[str(left)], embeddings[str(right)]) for left, right in pairs],
         dtype=np.float32,
