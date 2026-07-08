@@ -15,6 +15,11 @@ class ArcMarginProduct(nn.Module):
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         nn.init.xavier_uniform_(self.weight)
 
+        self.set_margin(margin)
+
+    def set_margin(self, margin: float) -> None:
+        """动态更新 ArcFace margin，供 margin warmup 使用。"""
+        self.margin = margin
         self.cos_m = math.cos(margin)
         self.sin_m = math.sin(margin)
         self.th = math.cos(math.pi - margin)
@@ -30,3 +35,15 @@ class ArcMarginProduct(nn.Module):
         one_hot.scatter_(1, labels.view(-1, 1), 1.0)
         logits = (one_hot * phi) + ((1.0 - one_hot) * cosine)
         return logits * self.scale
+
+
+class CenterLoss(nn.Module):
+    """Center Loss：把同一身份的 embedding 拉向该身份的可学习中心。"""
+
+    def __init__(self, num_classes: int, feat_dim: int):
+        super().__init__()
+        self.centers = nn.Parameter(torch.randn(num_classes, feat_dim))
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        centers_batch = self.centers.index_select(0, labels)
+        return 0.5 * (embeddings - centers_batch).pow(2).sum(dim=1).mean()

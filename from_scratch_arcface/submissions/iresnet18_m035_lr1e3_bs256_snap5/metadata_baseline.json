@@ -1,0 +1,18 @@
+{
+  "output_dir": "submissions/iresnet18_m035_lr1e3_bs256_snap5",
+  "eval_name": "baseline",
+  "submission": "submissions/iresnet18_m035_lr1e3_bs256_snap5/submission_baseline.csv",
+  "scores": "submissions/iresnet18_m035_lr1e3_bs256_snap5/scores_baseline.csv",
+  "checkpoints": [
+    "models/iresnet18_m035_lr1e3_bs256_snap5/best.pt"
+  ],
+  "checkpoint_thresholds": [
+    0.19400000000000006
+  ],
+  "threshold": 0.19400000000000006,
+  "threshold_source": "checkpoint_average",
+  "tta": false,
+  "batch_size": 512,
+  "num_workers": 8,
+  "num_pairs": 43000
+}

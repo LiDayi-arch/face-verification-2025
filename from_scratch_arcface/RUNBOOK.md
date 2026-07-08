@@ -39,6 +39,8 @@ python make_submission.py --data-root .. --checkpoint checkpoints_iresnet34/best
 - `train_cls_acc`: identity classification accuracy. It can be low early because there are many classes.
 - `val_ver_acc`: verification accuracy on held-out identities. This is the main signal.
 - `threshold`: cosine threshold selected on validation pairs.
+- `margin`: current ArcFace margin. It changes only when dynamic margin is enabled.
+- `center_loss`: Center Loss value. It is useful only when `--center-loss-weight > 0`.
 
 Prefer checkpoints with better `val_ver_acc`, not necessarily lower training loss.
 
@@ -48,26 +50,138 @@ For a more stable validation estimate after the first successful run, add:
 --val-positives 10000 --val-negatives 10000
 ```
 
-## TTA And Score Sweep
+## Dynamic Margin, Augmentation, And Center Loss
 
-Generate an iresnet18 submission with horizontal-flip TTA and save raw similarity scores:
+The default training behavior stays the same unless these arguments are provided.
+
+Available augmentation policies:
+
+```text
+none  no random training augmentation except tensor conversion and normalization
+v1    original conservative augmentation
+v2    v1 + light RandomAffine(degrees=5, translate=3%, scale=0.95~1.05)
+v3    v2 + light blur/autocontrast, slightly stronger color jitter
+```
+
+First recommended IR-ResNet18 experiment:
 
 ```bash
-python make_submission.py --data-root .. --checkpoint checkpoints_iresnet18_m035/best.pt --out submission_iresnet18_tta.csv --scores-out scores_iresnet18_tta.csv --batch-size 512 --tta
+python train.py --data-root .. \
+  --backbone iresnet18 \
+  --epochs 30 \
+  --batch-size 256 \
+  --num-workers 8 \
+  --amp \
+  --lr 1e-3 \
+  --margin 0.40 \
+  --margin-start 0.10 \
+  --margin-end 0.40 \
+  --margin-warmup-epochs 10 \
+  --augment v2 \
+  --center-loss-weight 0.001 \
+  --center-lr 1e-2 \
+  --model-root models \
+  --history-root histories \
+  --run-name iresnet18_dynm010to040_augv2_center0001_bs256_snap5 \
+  --save-every 5
+```
+
+If this improves over the previous `iresnet18_m035_lr1e3_bs256_snap5`, move the same settings to IR-ResNet34.
+
+## Validation Error Analysis
+
+Use this to inspect false positives and false negatives on held-out training identities. This is allowed because it uses validation data split from `train`, not Kaggle test labels.
+
+Single checkpoint:
+
+```bash
+python analyze_val_errors.py --data-root .. \
+  --checkpoint models/iresnet18_m035_lr1e3_bs256_snap5/best.pt \
+  --run-name iresnet18_m035_lr1e3_bs256_snap5_best \
+  --batch-size 512 \
+  --top-k 200 \
+  --copy-images
+```
+
+Snapshot + TTA error analysis:
+
+```bash
+python analyze_val_errors.py --data-root .. \
+  --checkpoint \
+  models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_010.pt \
+  models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_015.pt \
+  models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_020.pt \
+  --run-name iresnet18_snapshot_10_15_20_tta \
+  --batch-size 512 \
+  --tta \
+  --top-k 200 \
+  --copy-images
+```
+
+Outputs:
+
+```text
+error_analysis/<run-name>/
+  val_errors.csv
+  summary.json
+  index.html
+  images/
+```
+
+## TTA And Score Sweep
+
+Submission outputs are now organized automatically. If `--out` and `--scores-out` are not specified,
+`make_submission.py` writes files like this:
+
+```text
+submissions/
+  README.md
+  iresnet18_m035_lr1e3_bs256_snap5/
+    submission_baseline.csv
+    scores_baseline.csv
+    metadata_baseline.json
+    submission_tta.csv
+    scores_tta.csv
+    metadata_tta.json
+    submission_snapshot_10_15_20_tta.csv
+    scores_snapshot_10_15_20_tta.csv
+    metadata_snapshot_10_15_20_tta.json
+    submission_tta_t0p1900.csv
+```
+
+Generate the plain baseline submission:
+
+```bash
+python make_submission.py --data-root .. \
+  --checkpoint models/iresnet18_m035_lr1e3_bs256_snap5/best.pt \
+  --eval-name baseline \
+  --batch-size 512
+```
+
+Generate a submission with horizontal-flip TTA:
+
+```bash
+python make_submission.py --data-root .. \
+  --checkpoint models/iresnet18_m035_lr1e3_bs256_snap5/best.pt \
+  --eval-name tta \
+  --batch-size 512 \
+  --tta
 ```
 
 Generate new submissions from the saved scores without recomputing embeddings:
 
 ```bash
-python scores_to_submission.py --scores scores_iresnet18_tta.csv --threshold 0.17 --out submission_iresnet18_tta_t017.csv
-python scores_to_submission.py --scores scores_iresnet18_tta.csv --threshold 0.19 --out submission_iresnet18_tta_t019.csv
-python scores_to_submission.py --scores scores_iresnet18_tta.csv --threshold 0.21 --out submission_iresnet18_tta_t021.csv
-```
+python scores_to_submission.py \
+  --scores submissions/iresnet18_m035_lr1e3_bs256_snap5/scores_tta.csv \
+  --threshold 0.17
 
-Average multiple checkpoints or models by passing more than one checkpoint:
+python scores_to_submission.py \
+  --scores submissions/iresnet18_m035_lr1e3_bs256_snap5/scores_tta.csv \
+  --threshold 0.19
 
-```bash
-python make_submission.py --data-root .. --checkpoint checkpoints_iresnet18_m035/best.pt checkpoints_iresnet18_m035/last.pt --out submission_iresnet18_best_last_tta.csv --scores-out scores_iresnet18_best_last_tta.csv --batch-size 512 --tta
+python scores_to_submission.py \
+  --scores submissions/iresnet18_m035_lr1e3_bs256_snap5/scores_tta.csv \
+  --threshold 0.21
 ```
 
 ## Snapshot Checkpoints
@@ -114,9 +228,11 @@ Use selected snapshots for ensemble. Do not blindly average very early bad snaps
 
 ```bash
 python make_submission.py --data-root .. \
-  --checkpoint models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_010.pt models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_015.pt models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_020.pt \
-  --out submission_iresnet18_snap_tta.csv \
-  --scores-out scores_iresnet18_snap_tta.csv \
+  --checkpoint \
+  models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_010.pt \
+  models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_015.pt \
+  models/iresnet18_m035_lr1e3_bs256/snapshots/epoch_020.pt \
+  --eval-name snapshot_10_15_20_tta \
   --batch-size 512 \
   --tta
 ```

@@ -1,0 +1,24 @@
+{
+  "output_dir": "submissions/iresnet18_m035_lr1e3_bs256_snap5",
+  "eval_name": "best_snapshot_10_15_20_tta",
+  "submission": "submissions/iresnet18_m035_lr1e3_bs256_snap5/submission_best_snapshot_10_15_20_tta.csv",
+  "scores": "submissions/iresnet18_m035_lr1e3_bs256_snap5/scores_best_snapshot_10_15_20_tta.csv",
+  "checkpoints": [
+    "models/iresnet18_m035_lr1e3_bs256_snap5/best.pt",
+    "models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_010.pt",
+    "models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_015.pt",
+    "models/iresnet18_m035_lr1e3_bs256_snap5/snapshots/epoch_020.pt"
+  ],
+  "checkpoint_thresholds": [
+    0.19400000000000006,
+    0.19700000000000006,
+    0.17800000000000005,
+    0.17200000000000004
+  ],
+  "threshold": 0.18525000000000005,
+  "threshold_source": "checkpoint_average",
+  "tta": true,
+  "batch_size": 512,
+  "num_workers": 8,
+  "num_pairs": 43000
+}

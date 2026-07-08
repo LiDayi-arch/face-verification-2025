@@ -39,15 +39,48 @@ def remap_labels(items: list[tuple[str, int]]) -> tuple[list[tuple[str, int]], d
     return [(path, label_map[label]) for path, label in items], label_map
 
 
-def build_train_transform() -> transforms.Compose:
-    return transforms.Compose(
-        [
+def build_train_transform(augment: str = "v1") -> transforms.Compose:
+    """训练数据增强。
+
+    v1 是原始保守增强；v2 增加轻微仿射变换；v3 在 v2 基础上增加轻微模糊和自动对比度。
+    """
+    if augment == "none":
+        before_tensor = []
+        erase_p = 0.0
+    elif augment == "v1":
+        before_tensor = [
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
             transforms.RandomGrayscale(p=0.05),
+        ]
+        erase_p = 0.1
+    elif augment == "v2":
+        before_tensor = [
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomAffine(degrees=5, translate=(0.03, 0.03), scale=(0.95, 1.05)),
+            transforms.ColorJitter(brightness=0.22, contrast=0.22, saturation=0.12),
+            transforms.RandomGrayscale(p=0.05),
+        ]
+        erase_p = 0.1
+    elif augment == "v3":
+        before_tensor = [
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomAffine(degrees=5, translate=(0.03, 0.03), scale=(0.95, 1.05)),
+            transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.15),
+            transforms.RandomGrayscale(p=0.06),
+            transforms.RandomApply([transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))], p=0.08),
+            transforms.RandomAutocontrast(p=0.08),
+        ]
+        erase_p = 0.12
+    else:
+        raise ValueError(f"Unknown augment policy: {augment}")
+
+    return transforms.Compose(
+        [
+            *before_tensor,
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            transforms.RandomErasing(p=0.1, scale=(0.02, 0.12), ratio=(0.3, 3.3), value=0),
+            transforms.RandomErasing(p=erase_p, scale=(0.02, 0.10), ratio=(0.3, 3.3), value=0),
         ]
     )
 
